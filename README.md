@@ -1,1 +1,166 @@
-# game-server
+ const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+
+// Initialize express app
+const app = express();
+
+// Create HTTP server and bind Socket.IO
+const server = http.createServer(app);
+const io = socketIo(server);
+
+// Store players
+let players = {};
+
+// Serve static files (for frontend)
+app.use(express.static('public'));
+
+// Handle player connection
+io.on('connection', (socket) => {
+    console.log('New player connected: ' + socket.id);
+
+    // Initialize new player data
+    players[socket.id] = {
+        id: socket.id,
+        x: 300, // Default position
+        y: 300, // Default position
+        color: getRandomColor()
+    };
+
+    // Send current players data to the newly connected player
+    socket.emit('currentPlayers', players);
+
+    // Notify all clients about the new player
+    socket.broadcast.emit('newPlayer', players[socket.id]);
+
+    // Listen for player movement and update positions
+    socket.on('move', (data) => {
+        if (players[socket.id]) {
+            players[socket.id].x = data.x;
+            players[socket.id].y = data.y;
+            // Broadcast player movement to all clients
+            io.emit('playerMoved', players[socket.id]);
+        }
+    });
+
+    // Handle disconnection
+    socket.on('disconnect', () => {
+        console.log('Player disconnected: ' + socket.id);
+        delete players[socket.id];
+        // Notify all clients about the player leaving
+        io.emit('playerDisconnected', socket.id);
+    });
+});
+
+// Function to generate a random color for each player
+function getRandomColor() {
+    const letters = '0123456789ABCDEF';
+    let color = '#';
+    for (let i = 0; i < 6; i++) {
+        color += letters[Math.floor(Math.random() * 16)];
+    }
+    return color;
+}
+
+// Start the server
+const port = 3000;
+server.listen(port, () => {
+    console.log(`Server running on http://localhost:${port}`);
+});
+   
+
+
+
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #f0f0f0;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Resize canvas to full screen
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let players = {};
+        let myPlayer = null;
+
+        // Listen for current players data from server
+        socket.on('currentPlayers', (data) => {
+            players = data;
+            draw();
+        });
+
+        // Listen for new player joining
+        socket.on('newPlayer', (player) => {
+            players[player.id] = player;
+            draw();
+        });
+
+        // Listen for player movement update
+        socket.on('playerMoved', (player) => {
+            players[player.id] = player;
+            draw();
+        });
+
+        // Listen for player disconnect
+        socket.on('playerDisconnected', (playerId) => {
+            delete players[playerId];
+            draw();
+        });
+
+        // Handle player movement with arrow keys
+        window.addEventListener('keydown', (event) => {
+            if (!myPlayer) return;
+
+            if (event.key === 'ArrowUp') myPlayer.y -= 5;
+            if (event.key === 'ArrowDown') myPlayer.y += 5;
+            if (event.key === 'ArrowLeft') myPlayer.x -= 5;
+            if (event.key === 'ArrowRight') myPlayer.x += 5;
+
+            // Send updated position to server
+            socket.emit('move', { x: myPlayer.x, y: myPlayer.y });
+        });
+
+        // Draw all players on the canvas
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (let playerId in players) {
+                const player = players[playerId];
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, 30, 0, Math.PI * 2);
+                ctx.fillStyle = player.color;
+                ctx.fill();
+                ctx.stroke();
+            }
+
+            // Set my player once the data is received
+            if (!myPlayer && players[socket.id]) {
+                myPlayer = players[socket.id];
+            }
+        }
+    </script>
+</body>
+</html>
